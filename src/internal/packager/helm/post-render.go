@@ -9,7 +9,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/zarf-dev/zarf/src/pkg/state"
 
@@ -197,7 +196,7 @@ func (r *renderer) editHelmResources(ctx context.Context, resources []releaseuti
 				labels = map[string]string{}
 			}
 			obj.SetLabels(r.setPackageLabels(labels))
-			// Add the package label to pod templates (for Deployments, StatefulSets, etc.)
+			// Add the package label to the pod template of anything that has one
 			if err := r.addPodTemplateLabels(obj); err != nil {
 				return fmt.Errorf("failed to add labels to pod template: %w", err)
 			}
@@ -322,53 +321,57 @@ func flattenListResource(obj *unstructured.Unstructured, addResource func(*unstr
 	})
 }
 
-// podTemplateKinds maps the kinds zarf labels the pod template of to where that template keeps its
-// labels. Only a kind known to have a pod template is touched: a custom resource is free to hold
-// anything at spec.template, and labeling whatever happens to sit there fails the deploy of charts
-// that are valid for helm and kubectl alike.
-var podTemplateKinds = map[schema.GroupKind][]string{
-	{Group: "apps", Kind: "Deployment"}:        {"spec", "template", "metadata", "labels"},
-	{Group: "apps", Kind: "StatefulSet"}:       {"spec", "template", "metadata", "labels"},
-	{Group: "apps", Kind: "DaemonSet"}:         {"spec", "template", "metadata", "labels"},
-	{Group: "apps", Kind: "ReplicaSet"}:        {"spec", "template", "metadata", "labels"},
-	{Group: "batch", Kind: "Job"}:              {"spec", "template", "metadata", "labels"},
-	{Group: "batch", Kind: "CronJob"}:          {"spec", "jobTemplate", "spec", "template", "metadata", "labels"},
-	{Group: "", Kind: "ReplicationController"}: {"spec", "template", "metadata", "labels"},
+// podTemplatePath is where a workload keeps the labels of the pod template it creates pods from.
+var podTemplatePath = []string{"spec", "template", "metadata", "labels"}
+
+// podTemplatePathsByKind holds the kinds that keep their pod template somewhere else, so a kind
+// is listed only when listing it changes the answer.
+var podTemplatePathsByKind = map[schema.GroupKind][]string{
+	{Group: "batch", Kind: "CronJob"}: {"spec", "jobTemplate", "spec", "template", "metadata", "labels"},
 }
 
 // addPodTemplateLabels adds the package labels to the pod template of a workload resource
 func (r *renderer) addPodTemplateLabels(obj *unstructured.Unstructured) error {
-	path, hasPodTemplate := podTemplateKinds[obj.GroupVersionKind().GroupKind()]
-	if !hasPodTemplate {
-		return nil
+	path, ok := podTemplatePathsByKind[obj.GroupVersionKind().GroupKind()]
+	if !ok {
+		path = podTemplatePath
 	}
-	labels, found, err := labelsAt(obj, path)
-	if err != nil || !found {
-		return err
+	labels, found := ensureLabelsAt(obj, path)
+	if !found {
+		return nil
 	}
 	return unstructured.SetNestedStringMap(obj.Object, r.setPackageLabels(labels), path...)
 }
 
-// labelsAt returns the label map at path, ready to be written back to.
-// Everything above the last two segments has to be there already, since a resource without a pod
-// template has nothing to label and writing the path in would invent one the chart never asked
-// for. The last two are optional in a manifest, so they are created when missing, including when
-// they are written as null: that is valid yaml and parses to nil, which reads back as absent and
-// which unstructured.SetNestedStringMap refuses to write through.
-func labelsAt(obj *unstructured.Unstructured, path []string) (map[string]string, bool, error) {
+// objectMetaTail counts the trailing metadata and labels segments every label path ends in, as in
+// spec.template.metadata.labels.
+const objectMetaTail = 2
+
+// ensureLabelsAt returns the label map at path, creating it when the manifest left it out or wrote
+// it as null. Finding none is an answer, not an error: a resource is free to keep anything at
+// spec.template, and a malformed one is the API server's to report rather than zarf's to fail the
+// whole deploy over.
+func ensureLabelsAt(obj *unstructured.Unstructured, path []string) (map[string]string, bool) {
+	if len(path) < objectMetaTail {
+		return nil, false
+	}
+	// the route down must exist, or there is no pod template here and writing it in would invent
+	// one; the ObjectMeta and labels at the end are optional in a manifest, so those are created
+	parentPath, metaPath := path[:len(path)-objectMetaTail], path[len(path)-objectMetaTail:]
+
 	parent := obj.Object
-	for _, field := range path[:len(path)-2] {
+	for _, field := range parentPath {
 		nested, isMap := parent[field].(map[string]interface{})
 		if !isMap {
-			return nil, false, nil
+			return nil, false
 		}
 		parent = nested
 	}
-	for _, field := range path[len(path)-2:] {
+	for _, field := range metaPath {
 		nested, isMap := parent[field].(map[string]interface{})
 		if !isMap {
 			if parent[field] != nil {
-				return nil, false, fmt.Errorf("%s is not a map", strings.Join(path, "."))
+				return nil, false
 			}
 			nested = map[string]interface{}{}
 			parent[field] = nested
@@ -379,11 +382,11 @@ func labelsAt(obj *unstructured.Unstructured, path []string) (map[string]string,
 	for key, value := range parent {
 		text, isString := value.(string)
 		if !isString {
-			return nil, false, fmt.Errorf("label %q in %s is not a string", key, strings.Join(path, "."))
+			return nil, false
 		}
 		labels[key] = text
 	}
-	return labels, true, nil
+	return labels, true
 }
 
 // agentMutatedKinds maps resources mutated by the Zarf agent webhook to the
@@ -420,10 +423,7 @@ func addAgentIgnoreLabels(obj *unstructured.Unstructured) error {
 	}
 
 	for _, path := range labelPaths {
-		labels, found, err := labelsAt(obj, path)
-		if err != nil {
-			return err
-		}
+		labels, found := ensureLabelsAt(obj, path)
 		if !found {
 			continue
 		}
