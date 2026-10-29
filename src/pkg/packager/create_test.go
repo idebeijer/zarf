@@ -161,8 +161,8 @@ func TestPackageCreateSignsArchiveAndOCIOutputs(t *testing.T) {
 
 	t.Run("archive", func(t *testing.T) {
 		packagePath, err := Create(ctx, source, t.TempDir(), CreateOptions{
-			CachePath:       t.TempDir(),
-			SignBlobOptions: &signOpts,
+			CachePath: t.TempDir(),
+			Signer:    signing.NewPackageSigner(signOpts),
 		})
 		require.NoError(t, err)
 
@@ -170,39 +170,20 @@ func TestPackageCreateSignsArchiveAndOCIOutputs(t *testing.T) {
 		verifyOpts.Key = publicKeyPath
 		pkgLayout, err := layout.LoadFromTar(ctx, packagePath, layout.PackageLayoutOptions{
 			VerificationStrategy: layout.VerifyAlways,
-			VerifyBlobOptions:    &verifyOpts,
+			Verifier:             signing.NewPackageVerifier(verifyOpts),
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, pkgLayout.Cleanup()) })
 		require.True(t, pkgLayout.IsSigned())
 		require.FileExists(t, filepath.Join(pkgLayout.DirPath(), layout.Bundle))
-	})
-
-	t.Run("deprecated key fields archive", func(t *testing.T) {
-		packagePath, err := Create(ctx, source, t.TempDir(), CreateOptions{
-			CachePath:          t.TempDir(),
-			SigningKeyPath:     signOpts.Key,
-			SigningKeyPassword: signOpts.Password,
-		})
-		require.NoError(t, err)
-
-		verifyOpts := signing.DefaultVerifyBlobOptions()
-		verifyOpts.Key = publicKeyPath
-		pkgLayout, err := layout.LoadFromTar(ctx, packagePath, layout.PackageLayoutOptions{
-			VerificationStrategy: layout.VerifyAlways,
-			VerifyBlobOptions:    &verifyOpts,
-		})
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, pkgLayout.Cleanup()) })
-		require.True(t, pkgLayout.IsSigned())
 	})
 
 	t.Run("OCI", func(t *testing.T) {
 		registryRef := createRegistry(ctx, t)
 		packageRef, err := Create(ctx, source, fmt.Sprintf("oci://%s", registryRef.String()), CreateOptions{
-			CachePath:       t.TempDir(),
-			RemoteOptions:   defaultTestRemoteOptions(),
-			SignBlobOptions: &signOpts,
+			CachePath:     t.TempDir(),
+			RemoteOptions: defaultTestRemoteOptions(),
+			Signer:        signing.NewPackageSigner(signOpts),
 		})
 		require.NoError(t, err)
 
@@ -210,41 +191,6 @@ func TestPackageCreateSignsArchiveAndOCIOutputs(t *testing.T) {
 		t.Cleanup(func() { require.NoError(t, pkgLayout.Cleanup()) })
 		require.True(t, pkgLayout.IsSigned())
 		require.FileExists(t, filepath.Join(pkgLayout.DirPath(), layout.Bundle))
-	})
-
-	t.Run("deprecated key fields OCI", func(t *testing.T) {
-		registryRef := createRegistry(ctx, t)
-		packageRef, err := Create(ctx, source, fmt.Sprintf("oci://%s", registryRef.String()), CreateOptions{
-			CachePath:          t.TempDir(),
-			RemoteOptions:      defaultTestRemoteOptions(),
-			SigningKeyPath:     signOpts.Key,
-			SigningKeyPassword: signOpts.Password,
-		})
-		require.NoError(t, err)
-
-		pkgLayout := pullFromRemote(ctx, t, packageRef, "amd64", publicKeyPath, t.TempDir(), defaultTestRemoteOptions())
-		t.Cleanup(func() { require.NoError(t, pkgLayout.Cleanup()) })
-		require.True(t, pkgLayout.IsSigned())
-	})
-
-	t.Run("explicit signing options override deprecated key fields", func(t *testing.T) {
-		packagePath, err := Create(ctx, source, t.TempDir(), CreateOptions{
-			CachePath:          t.TempDir(),
-			SignBlobOptions:    &signOpts,
-			SigningKeyPath:     filepath.Join(t.TempDir(), "missing.key"),
-			SigningKeyPassword: "wrong-password",
-		})
-		require.NoError(t, err)
-
-		verifyOpts := signing.DefaultVerifyBlobOptions()
-		verifyOpts.Key = publicKeyPath
-		pkgLayout, err := layout.LoadFromTar(ctx, packagePath, layout.PackageLayoutOptions{
-			VerificationStrategy: layout.VerifyAlways,
-			VerifyBlobOptions:    &verifyOpts,
-		})
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, pkgLayout.Cleanup()) })
-		require.True(t, pkgLayout.IsSigned())
 	})
 }
 

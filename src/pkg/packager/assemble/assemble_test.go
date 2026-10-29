@@ -27,6 +27,7 @@ import (
 	"github.com/zarf-dev/zarf/src/pkg/images"
 	"github.com/zarf-dev/zarf/src/pkg/packager/layout"
 	"github.com/zarf-dev/zarf/src/pkg/packager/load"
+	"github.com/zarf-dev/zarf/src/pkg/packager/sbom"
 	"github.com/zarf-dev/zarf/src/pkg/value"
 	"github.com/zarf-dev/zarf/src/test/testutil"
 	"github.com/zarf-dev/zarf/src/types"
@@ -1222,7 +1223,7 @@ func TestCreateAbsolutePathImports(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, loaded.Close()) })
 	// create the package
-	pkgLayout, err := AssemblePackage(context.Background(), loaded, AssembleOptions{})
+	pkgLayout, err := AssemblePackage(context.Background(), loaded, AssembleOptions{SBOMGenerator: sbom.NewSyftGenerator()})
 	require.NoError(t, err)
 
 	// Ensure the component has the correct file
