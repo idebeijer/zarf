@@ -3,6 +3,14 @@
 
 // Package sbom generates package SBOMs with syft. It is kept out of pkg/packager so programs that only
 // load or deploy packages do not link syft.
+//
+// Syft requires a database/sql driver registered as "sqlite" to catalog images, otherwise image SBOMs fail
+// with an unknown driver error regardless of the image contents. This package does not import one because
+// registering the name twice panics, so programs must link exactly one themselves:
+//
+//	import _ "modernc.org/sqlite"
+//
+// The Zarf CLI already links github.com/glebarez/go-sqlite through its dependencies.
 package sbom
 
 import (
@@ -34,6 +42,7 @@ import (
 type SyftGenerator struct{}
 
 // NewSyftGenerator returns an SBOM generator for assemble.AssembleOptions and packager.CreateOptions.
+// The program must link a "sqlite" database/sql driver, see the package documentation.
 func NewSyftGenerator() *SyftGenerator {
 	return &SyftGenerator{}
 }

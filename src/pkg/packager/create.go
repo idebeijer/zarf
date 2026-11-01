@@ -41,7 +41,8 @@ type CreateOptions struct {
 	MaxPackageSizeMB int
 	SBOMOut          string
 	SkipSBOM         bool
-	// SBOMGenerator creates SBOMs unless SkipSBOM is set, e.g. sbom.NewSyftGenerator.
+	// SBOMGenerator creates SBOMs unless SkipSBOM is set, e.g. sbom.NewSyftGenerator, which requires the
+	// program to link a "sqlite" database/sql driver.
 	SBOMGenerator           assemble.SBOMGenerator
 	DifferentialPackagePath string
 	OCIConcurrency          int

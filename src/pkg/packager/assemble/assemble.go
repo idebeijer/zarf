@@ -57,7 +57,8 @@ type AssembleOptions struct {
 	// Signer signs the package, e.g. signing.NewPackageSigner. A nil Signer leaves the package unsigned.
 	Signer   signature.Signer
 	SkipSBOM bool
-	// SBOMGenerator creates SBOMs unless SkipSBOM is set, e.g. sbom.NewSyftGenerator.
+	// SBOMGenerator creates SBOMs unless SkipSBOM is set, e.g. sbom.NewSyftGenerator, which requires the
+	// program to link a "sqlite" database/sql driver.
 	SBOMGenerator SBOMGenerator
 	// When DifferentialPackage is set the zarf package created only includes images and repos not in the differential package.
 	DifferentialPackage api.Package
